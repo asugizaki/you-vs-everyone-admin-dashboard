@@ -15,8 +15,11 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  startAfter,
   updateDoc,
-  where
+  where,
+  QueryDocumentSnapshot,
+  DocumentData
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import "./styles.css";
@@ -31,23 +34,54 @@ type DraftQuestion = {
   generationBatchId?: string;
 };
 
-const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL;
+const ADMIN_EMAILS = String(import.meta.env.VITE_ADMIN_EMAILS || "")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+
+const PAGE_SIZE = 100;
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [drafts, setDrafts] = useState<DraftQuestion[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [maxScoreFilter, setMaxScoreFilter] = useState("all");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  const isAdmin = user?.email === ADMIN_EMAIL;
+  const isAdmin = user?.email
+    ? ADMIN_EMAILS.includes(user.email.toLowerCase())
+    : false;
 
   const selectedCount = selectedIds.length;
 
-  const allSelected = useMemo(
-    () => drafts.length > 0 && selectedIds.length === drafts.length,
-    [drafts.length, selectedIds.length]
-  );
+  const visibleDrafts = useMemo(() => {
+    return drafts.filter((draft) => {
+      const matchesSearch =
+        search.trim().length === 0 ||
+        draft.text.toLowerCase().includes(search.toLowerCase()) ||
+        draft.options.some((option) =>
+          option.text.toLowerCase().includes(search.toLowerCase())
+        );
+
+      const matchesCategory =
+        categoryFilter === "all" || draft.category === categoryFilter;
+
+      const score = draft.qualityScore ?? 100;
+      const matchesScore =
+        maxScoreFilter === "all" || score <= Number(maxScoreFilter);
+
+      return matchesSearch && matchesCategory && matchesScore;
+    });
+  }, [drafts, search, categoryFilter, maxScoreFilter]);
+
+  const allSelected =
+    visibleDrafts.length > 0 &&
+    visibleDrafts.every((draft) => selectedIds.includes(draft.id));
 
   useEffect(() => {
     return onAuthStateChanged(auth, (nextUser) => {
@@ -58,7 +92,7 @@ function App() {
 
   useEffect(() => {
     if (isAdmin) {
-      void loadDrafts();
+      void loadDrafts(true);
     }
   }, [isAdmin]);
 
@@ -67,15 +101,19 @@ function App() {
     await signInWithPopup(auth, provider);
   }
 
-  async function loadDrafts() {
+  async function loadDrafts(reset = false) {
     setIsLoading(true);
 
-    const draftQuery = query(
-      collection(db, "questions"),
+    const constraints = [
       where("status", "==", "draft"),
       orderBy("createdAt", "desc"),
-      limit(300)
-    );
+      limit(PAGE_SIZE)
+    ];
+
+    const draftQuery =
+      reset || !lastDoc
+        ? query(collection(db, "questions"), ...constraints)
+        : query(collection(db, "questions"), ...constraints, startAfter(lastDoc));
 
     const snapshot = await getDocs(draftQuery);
 
@@ -93,8 +131,12 @@ function App() {
       };
     });
 
-    setDrafts(rows);
-    setSelectedIds([]);
+    setDrafts((current) => (reset ? rows : [...current, ...rows]));
+    setLastDoc(snapshot.docs[snapshot.docs.length - 1] ?? null);
+    setHasMore(snapshot.docs.length === PAGE_SIZE);
+
+    if (reset) setSelectedIds([]);
+
     setIsLoading(false);
   }
 
@@ -106,8 +148,17 @@ function App() {
     );
   }
 
-  function toggleAll() {
-    setSelectedIds(allSelected ? [] : drafts.map((draft) => draft.id));
+  function toggleAllVisible() {
+    if (allSelected) {
+      setSelectedIds((current) =>
+        current.filter((id) => !visibleDrafts.some((draft) => draft.id === id))
+      );
+      return;
+    }
+
+    setSelectedIds((current) =>
+      Array.from(new Set([...current, ...visibleDrafts.map((draft) => draft.id)]))
+    );
   }
 
   async function updateSelected(status: "published" | "rejected") {
@@ -126,12 +177,11 @@ function App() {
       )
     );
 
-    await loadDrafts();
-
+    await loadDrafts(true);
     setIsSaving(false);
   }
 
-  if (isLoading) {
+  if (isLoading && !user) {
     return (
       <main className="page">
         <section className="card center">
@@ -173,7 +223,8 @@ function App() {
         <div>
           <h1>Draft Questions</h1>
           <p className="muted">
-            {drafts.length} waiting for review · signed in as {user.email}
+            {visibleDrafts.length} shown · {drafts.length} loaded · signed in as{" "}
+            {user.email}
           </p>
         </div>
 
@@ -183,16 +234,52 @@ function App() {
       </header>
 
       <section className="toolbar card">
-        <button className="secondary" onClick={toggleAll}>
-          {allSelected ? "Clear Selection" : "Select All"}
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search question or option..."
+        />
+
+        <select
+          value={categoryFilter}
+          onChange={(event) => setCategoryFilter(event.target.value)}
+        >
+          <option value="all">All categories</option>
+          <option value="lifestyle">Lifestyle</option>
+          <option value="work">Work</option>
+          <option value="curiosity">Curiosity</option>
+          <option value="mindset">Mindset</option>
+          <option value="money">Money</option>
+          <option value="relationships">Relationships</option>
+          <option value="entertainment">Entertainment</option>
+          <option value="habits">Habits</option>
+          <option value="general">General</option>
+        </select>
+
+        <select
+          value={maxScoreFilter}
+          onChange={(event) => setMaxScoreFilter(event.target.value)}
+        >
+          <option value="all">All scores</option>
+          <option value="80">Score ≤ 80</option>
+          <option value="70">Score ≤ 70</option>
+          <option value="60">Score ≤ 60</option>
+          <option value="40">Score ≤ 40</option>
+        </select>
+
+        <button className="secondary" onClick={toggleAllVisible}>
+          {allSelected ? "Clear Visible" : "Select Visible"}
         </button>
 
-        <button className="secondary" onClick={loadDrafts}>
+        <button className="secondary" onClick={() => loadDrafts(true)}>
           Refresh
         </button>
 
-        <button disabled={selectedCount === 0 || isSaving} onClick={() => updateSelected("published")}>
-          Approve Selected ({selectedCount})
+        <button
+          disabled={selectedCount === 0 || isSaving}
+          onClick={() => updateSelected("published")}
+        >
+          Approve ({selectedCount})
         </button>
 
         <button
@@ -200,19 +287,19 @@ function App() {
           disabled={selectedCount === 0 || isSaving}
           onClick={() => updateSelected("rejected")}
         >
-          Reject Selected ({selectedCount})
+          Reject ({selectedCount})
         </button>
       </section>
 
-      {drafts.length === 0 ? (
+      {visibleDrafts.length === 0 ? (
         <section className="card center">
-          <h2>No draft questions</h2>
-          <p className="muted">Everything is reviewed.</p>
+          <h2>No matching drafts</h2>
+          <p className="muted">Try clearing filters or refreshing.</p>
         </section>
       ) : null}
 
       <section className="grid">
-        {drafts.map((draft) => {
+        {visibleDrafts.map((draft) => {
           const selected = selectedIds.includes(draft.id);
 
           return (
@@ -238,7 +325,7 @@ function App() {
                 <span>{draft.options[1]?.text}</span>
               </div>
 
-              {draft.qualityReasons && draft.qualityReasons.length > 0 ? (
+              {draft.qualityReasons?.length ? (
                 <ul className="reasons">
                   {draft.qualityReasons.map((reason) => (
                     <li key={reason}>{reason}</li>
@@ -247,14 +334,18 @@ function App() {
               ) : (
                 <p className="good">No quality warnings.</p>
               )}
-
-              {draft.generationBatchId ? (
-                <p className="batch">{draft.generationBatchId}</p>
-              ) : null}
             </article>
           );
         })}
       </section>
+
+      {hasMore ? (
+        <div className="loadMore">
+          <button disabled={isLoading} onClick={() => loadDrafts(false)}>
+            {isLoading ? "Loading..." : "Load More"}
+          </button>
+        </div>
+      ) : null}
     </main>
   );
 }
