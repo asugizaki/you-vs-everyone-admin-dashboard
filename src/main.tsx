@@ -102,42 +102,47 @@ function App() {
   }
 
   async function loadDrafts(reset = false) {
-    setIsLoading(true);
-
-    const constraints = [
-      where("status", "==", "draft"),
-      orderBy("createdAt", "desc"),
-      limit(PAGE_SIZE)
-    ];
-
-    const draftQuery =
-      reset || !lastDoc
-        ? query(collection(db, "questions"), ...constraints)
-        : query(collection(db, "questions"), ...constraints, startAfter(lastDoc));
-
-    const snapshot = await getDocs(draftQuery);
-
-    const rows = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-
-      return {
-        id: docSnap.id,
-        text: data.text,
-        category: data.category,
-        options: data.options ?? [],
-        qualityScore: data.qualityScore,
-        qualityReasons: data.qualityReasons ?? [],
-        generationBatchId: data.generationBatchId
-      };
-    });
-
-    setDrafts((current) => (reset ? rows : [...current, ...rows]));
-    setLastDoc(snapshot.docs[snapshot.docs.length - 1] ?? null);
-    setHasMore(snapshot.docs.length === PAGE_SIZE);
-
-    if (reset) setSelectedIds([]);
-
-    setIsLoading(false);
+    try {
+      setIsLoading(true);
+  
+      const constraints = [
+        where("status", "==", "draft"),
+        orderBy("createdAt", "desc"),
+        limit(PAGE_SIZE)
+      ];
+  
+      const draftQuery =
+        reset || !lastDoc
+          ? query(collection(db, "questions"), ...constraints)
+          : query(collection(db, "questions"), ...constraints, startAfter(lastDoc));
+  
+      const snapshot = await getDocs(draftQuery);
+  
+      const rows = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data();
+  
+        return {
+          id: docSnap.id,
+          text: data.text,
+          category: data.category,
+          options: data.options ?? [],
+          qualityScore: data.qualityScore,
+          qualityReasons: data.qualityReasons ?? [],
+          generationBatchId: data.generationBatchId
+        };
+      });
+  
+      setDrafts((current) => (reset ? rows : [...current, ...rows]));
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] ?? null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+  
+      if (reset) setSelectedIds([]);
+  
+      setIsLoading(false);
+    } catch (error) {
+      console.error("Failed to load drafts:", error);
+      alert("Failed to load drafts. Check browser console for details.");
+    }
   }
 
   function toggleSelected(id: string) {
