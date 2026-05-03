@@ -103,6 +103,13 @@ input {
   font-size: 36px;
 }
 
+.tabs {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
 .toolbar {
   display: flex;
   gap: 12px;
@@ -115,6 +122,7 @@ input {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 16px;
+  margin-top: 14px;
 }
 
 .question-card {
@@ -171,16 +179,11 @@ input {
   color: #2563eb;
 }
 
-.reasons {
-  color: #b45309;
-  font-size: 13px;
+.batch {
+  color: #9ca3af;
+  font-size: 12px;
   margin-top: 14px;
-}
-
-.good {
-  color: #16a34a;
-  font-weight: 800;
-  font-size: 13px;
+  font-weight: 700;
 }
 
 .loadMore {
