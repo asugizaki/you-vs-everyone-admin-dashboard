@@ -28,11 +28,16 @@ import "./styles.css";
 
 type AdminTab = "drafts" | "submissions";
 
+type QuestionOption = {
+  id: string;
+  text: string;
+};
+
 type QuestionRow = {
   id: string;
   text: string;
   category: string;
-  options: { id: string; text: string }[];
+  options: QuestionOption[];
   qualityScore?: number;
   qualityReasons?: string[];
   generationBatchId?: string;
@@ -42,9 +47,10 @@ type SubmittedQuestion = {
   id: string;
   text: string;
   category: string;
-  options: { id: string; text: string }[];
+  options: QuestionOption[];
   submittedBy?: string;
   status: string;
+  createdAt?: unknown;
 };
 
 const ADMIN_EMAILS = String(import.meta.env.VITE_ADMIN_EMAILS || "")
@@ -53,6 +59,26 @@ const ADMIN_EMAILS = String(import.meta.env.VITE_ADMIN_EMAILS || "")
   .filter(Boolean);
 
 const PAGE_SIZE = 100;
+
+function normalizeOptions(data: DocumentData): QuestionOption[] {
+  if (Array.isArray(data.options)) {
+    return data.options;
+  }
+
+  if (data.optionA || data.optionB) {
+    return [
+      { id: "a", text: data.optionA ?? "" },
+      { id: "b", text: data.optionB ?? "" }
+    ];
+  }
+
+  return [];
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
 
 function App() {
   const [tab, setTab] = useState<AdminTab>("drafts");
@@ -80,6 +106,9 @@ function App() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
+
+  const firebaseProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID;
 
   const isAdmin = user?.email
     ? ADMIN_EMAILS.includes(user.email.toLowerCase())
@@ -155,85 +184,106 @@ function App() {
 
   async function loadDrafts(reset = false) {
     setIsLoading(true);
+    setLoadError("");
 
-    const constraints = [
-      where("status", "==", "draft"),
-      orderBy("createdAt", "desc"),
-      limit(PAGE_SIZE)
-    ];
+    try {
+      const constraints = [
+        where("status", "==", "draft"),
+        orderBy("createdAt", "desc"),
+        limit(PAGE_SIZE)
+      ];
 
-    const draftQuery =
-      reset || !lastDraftDoc
-        ? query(collection(db, "questions"), ...constraints)
-        : query(
-            collection(db, "questions"),
-            ...constraints,
-            startAfter(lastDraftDoc)
-          );
+      const draftQuery =
+        reset || !lastDraftDoc
+          ? query(collection(db, "questions"), ...constraints)
+          : query(
+              collection(db, "questions"),
+              ...constraints,
+              startAfter(lastDraftDoc)
+            );
 
-    const snapshot = await getDocs(draftQuery);
+      const snapshot = await getDocs(draftQuery);
 
-    const rows = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
+      const rows = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data();
 
-      return {
-        id: docSnap.id,
-        text: data.text,
-        category: data.category,
-        options: data.options ?? [],
-        qualityScore: data.qualityScore,
-        qualityReasons: data.qualityReasons ?? [],
-        generationBatchId: data.generationBatchId
-      };
-    });
+        return {
+          id: docSnap.id,
+          text: data.text ?? "",
+          category: data.category ?? "general",
+          options: normalizeOptions(data),
+          qualityScore: data.qualityScore,
+          qualityReasons: data.qualityReasons ?? [],
+          generationBatchId: data.generationBatchId
+        };
+      });
 
-    setDrafts((current) => (reset ? rows : [...current, ...rows]));
-    setLastDraftDoc(snapshot.docs[snapshot.docs.length - 1] ?? null);
-    setHasMoreDrafts(snapshot.docs.length === PAGE_SIZE);
+      setDrafts((current) => (reset ? rows : [...current, ...rows]));
+      setLastDraftDoc(snapshot.docs[snapshot.docs.length - 1] ?? null);
+      setHasMoreDrafts(snapshot.docs.length === PAGE_SIZE);
 
-    if (reset) setSelectedDraftIds([]);
-    setIsLoading(false);
+      if (reset) setSelectedDraftIds([]);
+    } catch (error) {
+      setLoadError(`Could not load AI drafts: ${getErrorMessage(error)}`);
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   async function loadSubmissions(reset = false) {
     setIsLoading(true);
+    setLoadError("");
 
-    const constraints = [
-      where("status", "==", "pending"),
-      orderBy("createdAt", "desc"),
-      limit(PAGE_SIZE)
-    ];
+    try {
+      const constraints = [
+        where("status", "==", "pending"),
+        orderBy("createdAt", "desc"),
+        limit(PAGE_SIZE)
+      ];
 
-    const submissionQuery =
-      reset || !lastSubmissionDoc
-        ? query(collection(db, "submittedQuestions"), ...constraints)
-        : query(
-            collection(db, "submittedQuestions"),
-            ...constraints,
-            startAfter(lastSubmissionDoc)
-          );
+      const submissionQuery =
+        reset || !lastSubmissionDoc
+          ? query(collection(db, "submittedQuestions"), ...constraints)
+          : query(
+              collection(db, "submittedQuestions"),
+              ...constraints,
+              startAfter(lastSubmissionDoc)
+            );
 
-    const snapshot = await getDocs(submissionQuery);
+      const snapshot = await getDocs(submissionQuery);
 
-    const rows = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
+      const rows = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data();
 
-      return {
-        id: docSnap.id,
-        text: data.text,
-        category: data.category,
-        options: data.options ?? [],
-        submittedBy: data.submittedBy,
-        status: data.status
-      };
-    });
+        return {
+          id: docSnap.id,
+          text: data.text ?? "",
+          category: data.category ?? "general",
+          options: normalizeOptions(data),
+          submittedBy: data.submittedBy,
+          status: data.status ?? "unknown",
+          createdAt: data.createdAt
+        };
+      });
 
-    setSubmissions((current) => (reset ? rows : [...current, ...rows]));
-    setLastSubmissionDoc(snapshot.docs[snapshot.docs.length - 1] ?? null);
-    setHasMoreSubmissions(snapshot.docs.length === PAGE_SIZE);
+      setSubmissions((current) => (reset ? rows : [...current, ...rows]));
+      setLastSubmissionDoc(snapshot.docs[snapshot.docs.length - 1] ?? null);
+      setHasMoreSubmissions(snapshot.docs.length === PAGE_SIZE);
 
-    if (reset) setSelectedSubmissionIds([]);
-    setIsLoading(false);
+      if (reset) setSelectedSubmissionIds([]);
+    } catch (error) {
+      setLoadError(
+        `Could not load user submissions. Check Firestore index/rules/env vars. Error: ${getErrorMessage(
+          error
+        )}`
+      );
+
+      setSubmissions([]);
+      setLastSubmissionDoc(null);
+      setHasMoreSubmissions(false);
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   function toggleDraftSelected(id: string) {
@@ -276,7 +326,9 @@ function App() {
     }
 
     setSelectedSubmissionIds((current) =>
-      Array.from(new Set([...current, ...visibleSubmissions.map((item) => item.id)]))
+      Array.from(
+        new Set([...current, ...visibleSubmissions.map((item) => item.id)])
+      )
     );
   }
 
@@ -399,12 +451,19 @@ function App() {
         <div>
           <h1>Question Admin</h1>
           <p className="muted">Signed in as {user.email}</p>
+          <p className="muted">Firebase project: {firebaseProjectId}</p>
         </div>
 
         <button className="secondary" onClick={() => signOut(auth)}>
           Sign out
         </button>
       </header>
+
+      {loadError ? (
+        <section className="card" style={{ marginBottom: 18 }}>
+          <p style={{ color: "#dc2626", fontWeight: 900 }}>{loadError}</p>
+        </section>
+      ) : null}
 
       <section className="tabs">
         <button
@@ -434,6 +493,7 @@ function App() {
           onChange={(event) => setCategoryFilter(event.target.value)}
         >
           <option value="all">All categories</option>
+          <option value="general">General</option>
           <option value="lifestyle">Lifestyle</option>
           <option value="work">Work</option>
           <option value="curiosity">Curiosity</option>
@@ -442,7 +502,6 @@ function App() {
           <option value="relationships">Relationships</option>
           <option value="entertainment">Entertainment</option>
           <option value="habits">Habits</option>
-          <option value="general">General</option>
         </select>
 
         {tab === "drafts" ? (
@@ -581,7 +640,7 @@ function App() {
                 >
                   <div className="row">
                     <span className="pill">{submission.category}</span>
-                    <span className="score">User submitted</span>
+                    <span className="score">Status: {submission.status}</span>
                   </div>
 
                   <h2>{submission.text}</h2>
@@ -597,7 +656,9 @@ function App() {
                   </div>
 
                   {submission.submittedBy ? (
-                    <p className="batch">Submitted by: {submission.submittedBy}</p>
+                    <p className="batch">
+                      Submitted by: {submission.submittedBy}
+                    </p>
                   ) : null}
                 </article>
               );
