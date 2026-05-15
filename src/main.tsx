@@ -27,6 +27,22 @@ import {
 
 import { auth, db } from "./firebase";
 import "./styles.css";
+import { getFunctions, httpsCallable } from "firebase/functions";
+
+const functions = getFunctions(undefined, "us-central1");
+
+const rebuildQuestionPacksFunction = httpsCallable<
+  { category: string },
+  {
+    ok: boolean;
+    results: {
+      category: string;
+      deleted: number;
+      questionCount: number;
+      packCount: number;
+    }[];
+  }
+>(functions, "rebuildQuestionPacks");
 
 type AdminTab = "drafts" | "submissions" | "serverConfig";
 type SubmissionStatusFilter = "pending" | "approved" | "rejected" | "all";
@@ -617,6 +633,32 @@ function App() {
     setIsSaving(false);
   }
 
+  async function rebuildQuestionPacks() {
+    setIsSaving(true);
+    setLoadError("");
+  
+    try {
+      const result = await rebuildQuestionPacksFunction({
+        category: "all"
+      });
+  
+      alert(
+        [
+          "Question packs rebuilt.",
+          "",
+          ...result.data.results.map(
+            (item) =>
+              `${item.category}: ${item.questionCount} questions, ${item.packCount} packs`
+          )
+        ].join("\n")
+      );
+    } catch (error) {
+      setLoadError(`Could not rebuild packs: ${getErrorMessage(error)}`);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function rejectSubmissions() {
     if (selectedSubmissionIds.length === 0) return;
 
@@ -831,6 +873,9 @@ function App() {
             These values are read by Cloud Functions and do not require an app
             rebuild.
           </p>
+          <Button disabled={isSaving} onClick={rebuildQuestionPacks}>
+            Rebuild Question Packs
+          </Button>
 
           <label className="formRow">
             <span>Submissions enabled</span>
