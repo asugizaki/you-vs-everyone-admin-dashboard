@@ -190,3 +190,31 @@ input {
   text-align: center;
   padding: 28px 0;
 }
+
+.formRow {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.formRow span,
+.editLabel {
+  font-weight: 800;
+  color: #111827;
+}
+
+.formRow input,
+.question-card input,
+.question-card textarea,
+.question-card select {
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.question-card textarea {
+  min-height: 90px;
+  resize: vertical;
+}
