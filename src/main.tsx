@@ -873,9 +873,9 @@ function App() {
             These values are read by Cloud Functions and do not require an app
             rebuild.
           </p>
-          <Button disabled={isSaving} onClick={rebuildQuestionPacks}>
-            Rebuild Question Packs
-          </Button>
+          <button disabled={isSaving} onClick={rebuildQuestionPacks}>
+            {isSaving ? "Rebuilding..." : "Rebuild Question Packs"}
+          </button>
 
           <label className="formRow">
             <span>Submissions enabled</span>
